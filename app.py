@@ -6,6 +6,7 @@ import pdfplumber
 import io
 import json
 import re
+import time
 
 # ── Page config ───────────────────────────────────────────────
 st.set_page_config(
@@ -25,6 +26,22 @@ if not api_key:
     st.stop()
 
 client = anthropic.Anthropic(api_key=api_key)
+
+# ── Helper: Retry on overload ─────────────────────────────────
+def call_claude(messages, max_tokens=4000):
+    for attempt in range(3):
+        try:
+            return client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=max_tokens,
+                messages=messages
+            )
+        except Exception as e:
+            if "overloaded" in str(e).lower() and attempt < 2:
+                st.warning(f"API busy — retrying in 5 seconds (attempt {attempt + 1}/3)...")
+                time.sleep(5)
+                continue
+            raise
 
 # ── Header ────────────────────────────────────────────────────
 st.title("💰 Frugal Cash")
@@ -80,12 +97,9 @@ def extract_pdf_text(file):
 
 # ── Helper: Extract transactions from PDF using AI ────────────
 def extract_transactions(raw_text):
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"""This is raw text from an Indian bank statement.
+    message = call_claude([{
+        "role": "user",
+        "content": f"""This is raw text from an Indian bank statement.
 
 Your job:
 1. Find ALL debit transactions (money going OUT)
@@ -105,8 +119,7 @@ Rules:
 
 Bank statement text:
 {raw_text}"""
-        }]
-    )
+    }])
     raw = message.content[0].text.strip()
     raw = re.sub(r'```json\s*', '', raw)
     raw = re.sub(r'```\s*', '', raw)
@@ -119,12 +132,9 @@ def categorise_all(df):
         f"{i+1}. Description: {row['Description']} | Amount: Rs {row['Amount']}"
         for i, row in df.iterrows()
     ])
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"""Categorise each Indian bank transaction below.
+    message = call_claude([{
+        "role": "user",
+        "content": f"""Categorise each Indian bank transaction below.
 
 Categories:
 - Need: essential expenses (rent, groceries, EMI, medical, utilities, school fees, petrol, gas, insurance, electricity, broadband)
@@ -149,8 +159,7 @@ No explanation. No other text. Just the JSON array.
 
 Transactions:
 {transactions_text}"""
-        }]
-    )
+    }])
     raw = message.content[0].text.strip()
     raw = re.sub(r'```json\s*', '', raw)
     raw = re.sub(r'```\s*', '', raw)
@@ -250,17 +259,28 @@ uncat    = df[df["Category"] == "Uncategorised"]["Amount"].sum()
 # ── Metric cards ──────────────────────────────────────────────
 st.subheader("Your Spending Summary")
 col1, col2, col3, col4, col5, col6 = st.columns(6)
-col1.metric("Total Spent",        f"Rs{total:,.0f}")
-col2.metric("Need",               f"Rs{need:,.0f}",
-            f"{need/total*100:.1f}%",      delta_color="off")
-col3.metric("Greed",              f"Rs{greed:,.0f}",
-            f"{greed/total*100:.1f}%",     delta_color="inverse")
-col4.metric("Luxury",             f"Rs{luxury:,.0f}",
-            f"{luxury/total*100:.1f}%",    delta_color="inverse")
-col5.metric("Savings",            f"Rs{savings:,.0f}",
-            f"{savings/total*100:.1f}%",   delta_color="normal")
-col6.metric("Personal Transfer",  f"Rs{personal:,.0f}",
-            f"{personal/total*100:.1f}%",  delta_color="off")
+col1.metric("Total Spent",
+            f"Rs{total:,.0f}")
+col2.metric("Need",
+            f"Rs{need:,.0f}",
+            f"{need/total*100:.1f}%",
+            delta_color="off")
+col3.metric("Greed",
+            f"Rs{greed:,.0f}",
+            f"{greed/total*100:.1f}%",
+            delta_color="inverse")
+col4.metric("Luxury",
+            f"Rs{luxury:,.0f}",
+            f"{luxury/total*100:.1f}%",
+            delta_color="inverse")
+col5.metric("Savings",
+            f"Rs{savings:,.0f}",
+            f"{savings/total*100:.1f}%",
+            delta_color="normal")
+col6.metric("Personal Transfer",
+            f"Rs{personal:,.0f}",
+            f"{personal/total*100:.1f}%",
+            delta_color="off")
 
 st.divider()
 
@@ -302,8 +322,6 @@ st.subheader("Budget Health Check (50/30/20 Rule)")
 st.caption("Personal Transfers are excluded from this calculation")
 
 if salary > 0:
-    # Exclude personal transfers from health check
-    spendable = total - personal
     need_pct    = need    / salary * 100
     greed_pct   = greed   / salary * 100
     savings_pct = savings / salary * 100
@@ -359,7 +377,7 @@ if len(personal_df) > 0:
     st.caption(
         f"Rs{personal:,.0f} sent to individuals, local vendors, "
         f"auto drivers, and unknown recipients. "
-        f"These are excluded from your budget health calculation."
+        f"Excluded from budget health calculation."
     )
     st.dataframe(
         personal_df[["Date", "Description", "Amount"]],
@@ -379,4 +397,4 @@ if len(remaining_uncat) > 0:
         remaining_uncat[["Date", "Description", "Amount"]],
         use_container_width=True,
         hide_index=True
-        )
+    )
