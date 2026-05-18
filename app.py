@@ -5,6 +5,7 @@ import anthropic
 import pdfplumber
 import io
 import json
+import re
 
 # ── Page config ───────────────────────────────────────────────
 st.set_page_config(
@@ -50,9 +51,11 @@ with st.sidebar:
     st.markdown("2. Upload your bank statement")
     st.markdown("3. See your analysis instantly")
     st.divider()
-    st.markdown("### CSV Format Required")
+    st.markdown("### CSV / Excel Format Required")
     st.code("Date, Description, Amount, Type")
     st.markdown("Type must contain **Debit** or **Credit**")
+    st.markdown("### PDF")
+    st.markdown("Any text-based bank statement PDF works directly — no formatting needed")
 
 # ── File Upload ───────────────────────────────────────────────
 uploaded_file = st.file_uploader(
@@ -64,6 +67,14 @@ uploaded_file = st.file_uploader(
 if uploaded_file is None:
     st.info("Upload your bank statement above to get started")
     st.stop()
+
+# ── Helper: Clean AI JSON response ───────────────────────────
+def clean_json(raw):
+    raw = raw.strip()
+    raw = re.sub(r'```json\s*', '', raw)
+    raw = re.sub(r'```\s*', '', raw)
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    return match.group(0) if match else raw
 
 # ── Helper: Extract text from PDF ────────────────────────────
 def extract_pdf_text(file):
@@ -104,15 +115,18 @@ Bank statement text:
 {raw_text}"""
         }]
     )
-    return message.content[0].text.strip()
+    raw = message.content[0].text.strip()
+    raw = re.sub(r'```json\s*', '', raw)
+    raw = re.sub(r'```\s*', '', raw)
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    return match.group(0) if match else raw
 
-# ── Helper: AI categorise all transactions in one call ─────────
+# ── Helper: AI categorise all transactions in one call ────────
 def categorise_all(df):
     transactions_text = "\n".join([
         f"{i+1}. Description: {row['Description']} | Amount: Rs {row['Amount']}"
         for i, row in df.iterrows()
     ])
-
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=4000,
@@ -136,7 +150,11 @@ Transactions:
 {transactions_text}"""
         }]
     )
-    return message.content[0].text.strip()
+    raw = message.content[0].text.strip()
+    raw = re.sub(r'```json\s*', '', raw)
+    raw = re.sub(r'```\s*', '', raw)
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    return match.group(0) if match else raw
 
 # ── Load file ─────────────────────────────────────────────────
 file_type = uploaded_file.name.split(".")[-1].lower()
@@ -164,7 +182,7 @@ if file_type == "pdf":
         ).fillna(0)
         st.success(f"Found {len(df)} debit transactions")
     except json.JSONDecodeError:
-        st.error("Could not parse the PDF. Please try CSV or Excel instead.")
+        st.error("Could not parse the PDF. The statement format may not be supported yet.")
         st.stop()
 
 elif file_type == "csv":
@@ -337,4 +355,4 @@ if len(remaining_uncat) > 0:
         remaining_uncat[["Date", "Description", "Amount"]],
         use_container_width=True,
         hide_index=True
-)
+                           )
