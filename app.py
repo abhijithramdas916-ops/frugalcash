@@ -55,7 +55,7 @@ with st.sidebar:
     st.code("Date, Description, Amount, Type")
     st.markdown("Type must contain **Debit** or **Credit**")
     st.markdown("### PDF")
-    st.markdown("Any text-based bank statement PDF works directly — no formatting needed")
+    st.markdown("Any text-based bank statement PDF works directly")
 
 # ── File Upload ───────────────────────────────────────────────
 uploaded_file = st.file_uploader(
@@ -67,14 +67,6 @@ uploaded_file = st.file_uploader(
 if uploaded_file is None:
     st.info("Upload your bank statement above to get started")
     st.stop()
-
-# ── Helper: Clean AI JSON response ───────────────────────────
-def clean_json(raw):
-    raw = raw.strip()
-    raw = re.sub(r'```json\s*', '', raw)
-    raw = re.sub(r'```\s*', '', raw)
-    match = re.search(r'\[.*\]', raw, re.DOTALL)
-    return match.group(0) if match else raw
 
 # ── Helper: Extract text from PDF ────────────────────────────
 def extract_pdf_text(file):
@@ -135,14 +127,23 @@ def categorise_all(df):
             "content": f"""Categorise each Indian bank transaction below.
 
 Categories:
-- Need: essential expenses (rent, groceries, EMI, medical, utilities, school fees, petrol, gas, insurance)
-- Greed: lifestyle spending (dining, food delivery, streaming, ride hailing, shopping, entertainment, gym)
-- Luxury: premium purchases (high value gadgets, luxury brands, 5 star hotels, business class travel)
-- Savings: investments (SIP, FD, mutual funds, stocks, gold, PPF, NPS)
-- Uncategorised: genuinely unclear
+- Need: essential expenses (rent, groceries, EMI, medical, utilities, school fees, petrol, gas, insurance, electricity, broadband)
+- Greed: lifestyle spending (dining, food delivery, streaming, ride hailing, online shopping, entertainment, gym, subscriptions)
+- Luxury: premium purchases (high value gadgets, luxury brands, 5 star hotels, business class travel, jewellery)
+- Savings: investments (SIP, FD, mutual funds, stocks, gold, PPF, NPS, RD)
+- Personal Transfer: UPI transfers to individuals (person names like ABHIJITH, KUMAR, PRIYA), auto drivers, local vendors, small shops, payment gateways like Razorpay where recipient is unclear, charity donations, family transfers
+- Uncategorised: genuinely unclear after applying all above rules
+
+Important rules:
+- If description looks like a person's name → Personal Transfer
+- If description is a local business, small shop, or auto driver → Personal Transfer
+- If description contains Razorpay, Cashfree, Paytm transfer to unknown → Personal Transfer
+- If description is clearly a known brand or service → use Need/Greed/Luxury/Savings
+- Google, Netflix, Spotify, Amazon → Greed
+- Zepto, Blinkit, BigBasket → Need (grocery delivery)
 
 Return ONLY a JSON array with one category per transaction in the same order:
-["Need", "Greed", "Luxury", "Savings", "Uncategorised", ...]
+["Need", "Greed", "Luxury", "Savings", "Personal Transfer", "Uncategorised", ...]
 
 No explanation. No other text. Just the JSON array.
 
@@ -238,35 +239,39 @@ except json.JSONDecodeError:
     df["Category"] = "Uncategorised"
 
 # ── Summary numbers ───────────────────────────────────────────
-total   = df["Amount"].sum()
-need    = df[df["Category"] == "Need"]["Amount"].sum()
-greed   = df[df["Category"] == "Greed"]["Amount"].sum()
-luxury  = df[df["Category"] == "Luxury"]["Amount"].sum()
-savings = df[df["Category"] == "Savings"]["Amount"].sum()
-uncat   = df[df["Category"] == "Uncategorised"]["Amount"].sum()
+total    = df["Amount"].sum()
+need     = df[df["Category"] == "Need"]["Amount"].sum()
+greed    = df[df["Category"] == "Greed"]["Amount"].sum()
+luxury   = df[df["Category"] == "Luxury"]["Amount"].sum()
+savings  = df[df["Category"] == "Savings"]["Amount"].sum()
+personal = df[df["Category"] == "Personal Transfer"]["Amount"].sum()
+uncat    = df[df["Category"] == "Uncategorised"]["Amount"].sum()
 
 # ── Metric cards ──────────────────────────────────────────────
 st.subheader("Your Spending Summary")
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Total Spent", f"Rs{total:,.0f}")
-col2.metric("Need",        f"Rs{need:,.0f}",
-            f"{need/total*100:.1f}%",    delta_color="off")
-col3.metric("Greed",       f"Rs{greed:,.0f}",
-            f"{greed/total*100:.1f}%",   delta_color="inverse")
-col4.metric("Luxury",      f"Rs{luxury:,.0f}",
-            f"{luxury/total*100:.1f}%",  delta_color="inverse")
-col5.metric("Savings",     f"Rs{savings:,.0f}",
-            f"{savings/total*100:.1f}%", delta_color="normal")
+col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1.metric("Total Spent",        f"Rs{total:,.0f}")
+col2.metric("Need",               f"Rs{need:,.0f}",
+            f"{need/total*100:.1f}%",      delta_color="off")
+col3.metric("Greed",              f"Rs{greed:,.0f}",
+            f"{greed/total*100:.1f}%",     delta_color="inverse")
+col4.metric("Luxury",             f"Rs{luxury:,.0f}",
+            f"{luxury/total*100:.1f}%",    delta_color="inverse")
+col5.metric("Savings",            f"Rs{savings:,.0f}",
+            f"{savings/total*100:.1f}%",   delta_color="normal")
+col6.metric("Personal Transfer",  f"Rs{personal:,.0f}",
+            f"{personal/total*100:.1f}%",  delta_color="off")
 
 st.divider()
 
 # ── Charts ────────────────────────────────────────────────────
 COLOR_MAP = {
-    "Need":          "#2E75B6",
-    "Greed":         "#FFA500",
-    "Luxury":        "#C00000",
-    "Savings":       "#70AD47",
-    "Uncategorised": "#BFBFBF"
+    "Need":              "#2E75B6",
+    "Greed":             "#FFA500",
+    "Luxury":            "#C00000",
+    "Savings":           "#70AD47",
+    "Personal Transfer": "#7030A0",
+    "Uncategorised":     "#BFBFBF"
 }
 
 col_left, col_right = st.columns(2)
@@ -294,8 +299,11 @@ st.divider()
 
 # ── Budget Health Check ───────────────────────────────────────
 st.subheader("Budget Health Check (50/30/20 Rule)")
+st.caption("Personal Transfers are excluded from this calculation")
 
 if salary > 0:
+    # Exclude personal transfers from health check
+    spendable = total - personal
     need_pct    = need    / salary * 100
     greed_pct   = greed   / salary * 100
     savings_pct = savings / salary * 100
@@ -343,6 +351,22 @@ st.dataframe(
     hide_index=True
 )
 
+# ── Personal Transfer breakdown ───────────────────────────────
+personal_df = df[df["Category"] == "Personal Transfer"]
+if len(personal_df) > 0:
+    st.divider()
+    st.subheader("Personal Transfers")
+    st.caption(
+        f"Rs{personal:,.0f} sent to individuals, local vendors, "
+        f"auto drivers, and unknown recipients. "
+        f"These are excluded from your budget health calculation."
+    )
+    st.dataframe(
+        personal_df[["Date", "Description", "Amount"]],
+        use_container_width=True,
+        hide_index=True
+    )
+
 # ── Uncategorised helper ──────────────────────────────────────
 remaining_uncat = df[df["Category"] == "Uncategorised"]
 if len(remaining_uncat) > 0:
@@ -355,4 +379,4 @@ if len(remaining_uncat) > 0:
         remaining_uncat[["Date", "Description", "Amount"]],
         use_container_width=True,
         hide_index=True
-                           )
+        )
