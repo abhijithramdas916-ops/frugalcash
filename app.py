@@ -239,12 +239,11 @@ with st.spinner("AI is analysing your spending..."):
 
 try:
     categories = json.loads(categories_json)
-    if len(categories) != len(df):
-        categories = categories + ["Uncategorised"] * (
-            len(df) - len(categories)
-        )
+    categories = categories[:len(df)]
+    while len(categories) < len(df):
+        categories.append("Uncategorised")
     df["Category"] = categories
-except json.JSONDecodeError:
+except (json.JSONDecodeError, Exception):
     df["Category"] = "Uncategorised"
 
 # ── Summary numbers ───────────────────────────────────────────
