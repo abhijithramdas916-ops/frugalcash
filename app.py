@@ -7,6 +7,11 @@ import io
 import json
 import re
 import time
+import faiss
+import numpy as np
+import pickle
+import os
+from sentence_transformers import SentenceTransformer
 
 # ── Page config ───────────────────────────────────────────────
 st.set_page_config(
@@ -26,6 +31,66 @@ if not api_key:
     st.stop()
 
 client = anthropic.Anthropic(api_key=api_key)
+
+# ── Vector DB setup (FAISS) ────────────────────────────────────
+VECTOR_DIM = 384  # all-MiniLM-L6-v2 output size
+INDEX_PATH = "frugal_cash_index.faiss"
+METADATA_PATH = "frugal_cash_metadata.pkl"
+
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+embedder = load_embedding_model()
+
+def load_vector_store():
+    if os.path.exists(INDEX_PATH) and os.path.exists(METADATA_PATH):
+        index = faiss.read_index(INDEX_PATH)
+        with open(METADATA_PATH, "rb") as f:
+            metadata = pickle.load(f)
+    else:
+        index = faiss.IndexFlatL2(VECTOR_DIM)
+        metadata = []
+    return index, metadata
+
+def save_vector_store(index, metadata):
+    faiss.write_index(index, INDEX_PATH)
+    with open(METADATA_PATH, "wb") as f:
+        pickle.dump(metadata, f)
+
+if "faiss_index" not in st.session_state:
+    st.session_state.faiss_index, st.session_state.faiss_metadata = load_vector_store()
+
+def add_transactions_to_vector_store(df, user_id):
+    texts = [
+        f"{row['Date']} {row['Description']} Rs{row['Amount']} category:{row['Category']}"
+        for _, row in df.iterrows()
+    ]
+    vectors = embedder.encode(texts, convert_to_numpy=True).astype("float32")
+    st.session_state.faiss_index.add(vectors)
+    for _, row in df.iterrows():
+        st.session_state.faiss_metadata.append({
+            "user_id": user_id,
+            "date": str(row["Date"]),
+            "description": row["Description"],
+            "amount": float(row["Amount"]),
+            "category": row["Category"]
+        })
+    save_vector_store(st.session_state.faiss_index, st.session_state.faiss_metadata)
+
+def query_vector_store(question, user_id, k=15):
+    if st.session_state.faiss_index.ntotal == 0:
+        return []
+    q_vector = embedder.encode([question], convert_to_numpy=True).astype("float32")
+    distances, indices = st.session_state.faiss_index.search(q_vector, k)
+    results = []
+    for idx in indices[0]:
+        if idx == -1 or idx >= len(st.session_state.faiss_metadata):
+            continue
+        meta = st.session_state.faiss_metadata[idx]
+        if meta["user_id"] == user_id:
+            results.append(meta)
+    return results
 
 # ── Helper: Retry on overload ─────────────────────────────────
 def call_claude(messages, max_tokens=4000):
@@ -57,6 +122,7 @@ with st.sidebar:
         value=85000,
         step=1000
     )
+    user_id = st.text_input("User ID (for demo)", value="demo_user")
     st.divider()
     st.markdown("### Supported formats")
     st.markdown("✅ CSV")
@@ -246,6 +312,12 @@ try:
 except (json.JSONDecodeError, Exception):
     df["Category"] = "Uncategorised"
 
+# ── Store to vector DB ──────────────────────────────────────
+if st.button("💾 Save this statement to my financial history"):
+    with st.spinner("Storing in your financial history..."):
+        add_transactions_to_vector_store(df, user_id)
+    st.success(f"Saved {len(df)} transactions to your history ({st.session_state.faiss_index.ntotal} total stored)")
+
 # ── Summary numbers ───────────────────────────────────────────
 total    = df["Amount"].sum()
 need     = df[df["Category"] == "Need"]["Amount"].sum()
@@ -397,3 +469,31 @@ if len(remaining_uncat) > 0:
         use_container_width=True,
         hide_index=True
     )
+
+# ── Ask Frugal Cash (RAG) ────────────────────────────────────
+st.divider()
+st.subheader("💬 Ask Frugal Cash")
+st.caption("Ask about your spending history across saved statements")
+
+question = st.text_input("e.g. What was my highest spending month?")
+if question:
+    with st.spinner("Searching your history..."):
+        retrieved = query_vector_store(question, user_id)
+
+    if not retrieved:
+        st.info("No saved history found yet — save a statement above first.")
+    else:
+        context_text = "\n".join([
+            f"{r['date']} | {r['description']} | Rs{r['amount']} | {r['category']}"
+            for r in retrieved
+        ])
+        answer = call_claude([{
+            "role": "user",
+            "content": f"""Here is the user's transaction history:
+{context_text}
+
+User's question: {question}
+
+Answer using ONLY the data above. Be specific with numbers. If the data doesn't support an answer, say so."""
+        }])
+        st.write(answer.content[0].text)
