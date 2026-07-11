@@ -4,3 +4,5 @@ plotly
 openpyxl
 anthropic
 pdfplumber
+faiss-cpu
+sentence-transformers
