@@ -1,0 +1,5 @@
+.streamlit/secrets.toml
+__pycache__/
+*.pyc
+frugal_cash_index.faiss
+frugal_cash_metadata.pkl
