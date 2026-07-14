@@ -5,6 +5,4 @@ openpyxl
 anthropic
 pdfplumber
 faiss-cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.13.0+cpu
 sentence-transformers
