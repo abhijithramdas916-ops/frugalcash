@@ -30,7 +30,7 @@ st.markdown("""
         border-radius: 10px;
         padding: 14px 12px 10px 12px;
     }
-    div[data-testid="stMetricLabel"] {font-size: 13px; color: #4A4A4A !important;}
+    div[data-testid="stMetricLabel"] p {font-size: 13px; color: #4A4A4A !important;}
     div[data-testid="stMetricValue"] {color: #0F2740 !important;}
     div[data-testid="stMetricDelta"] {color: #4A4A4A !important;}
     h1 {color: #0F2740; font-weight: 700;}
@@ -464,11 +464,13 @@ tab_overview, tab_savings_loans, tab_investments, tab_ask = st.tabs(
 # ── TAB: Overview ───────────────────────────────────────────
 with tab_overview:
     st.subheader("Your Spending Summary")
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total", f"Rs{total:,.0f}")
     col2.metric("Need", f"Rs{need:,.0f}", f"{need/total*100:.1f}%", delta_color="off")
     col3.metric("Greed", f"Rs{greed:,.0f}", f"{greed/total*100:.1f}%", delta_color="inverse")
     col4.metric("Luxury", f"Rs{luxury:,.0f}", f"{luxury/total*100:.1f}%", delta_color="inverse")
+
+    col5, col6, col7 = st.columns(3)
     col5.metric("Savings", f"Rs{savings:,.0f}", f"{savings/total*100:.1f}%", delta_color="normal")
     col6.metric("Loan", f"Rs{loan_amt:,.0f}", f"{loan_amt/total*100:.1f}%", delta_color="off")
     col7.metric("Investment", f"Rs{invest_amt:,.0f}", f"{invest_amt/total*100:.1f}%", delta_color="normal")
