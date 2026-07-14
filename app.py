@@ -30,7 +30,9 @@ st.markdown("""
         border-radius: 10px;
         padding: 14px 12px 10px 12px;
     }
-    div[data-testid="stMetricLabel"] {font-size: 13px; color: #4A4A4A;}
+    div[data-testid="stMetricLabel"] {font-size: 13px; color: #4A4A4A !important;}
+    div[data-testid="stMetricValue"] {color: #0F2740 !important;}
+    div[data-testid="stMetricDelta"] {color: #4A4A4A !important;}
     h1 {color: #0F2740; font-weight: 700;}
     h2, h3 {color: #0F2740;}
     .stTabs [data-baseweb="tab-list"] {gap: 6px;}
@@ -40,10 +42,11 @@ st.markdown("""
         padding: 8px 16px;
         font-weight: 600;
     }
+    .stTabs [data-baseweb="tab"] p {color: #0F2740 !important;}
     .stTabs [aria-selected="true"] {
         background: #0F766E;
-        color: white;
     }
+    .stTabs [aria-selected="true"] p {color: white !important;}
     div[data-testid="stForm"] {
         background: #F7F9FA;
         border-radius: 10px;
